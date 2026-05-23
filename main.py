@@ -1,63 +1,11 @@
 import random
+import json
+from pathlib import Path
 
 # ログの保存用リスト
 logs = []
 
 MAX_REROLLS = 10000
-
-# 能力値のロールダイス
-status = {
-        "6th": {
-            "STR": (3,6,0,1), 
-            "CON": (3,6,0,1), 
-            "POW": (3,6,0,1), 
-            "DEX": (3,6,0,1), 
-            "APP": (3,6,0,1), 
-            "SIZ": (2,6,6,1), 
-            "INT": (2,6,6,1), 
-            "EDU": (3,6,3,1)
-            },
-        "7th": {
-            "STR": (3,6,0,5), 
-            "CON": (3,6,0,5), 
-            "POW": (3,6,0,5), 
-            "DEX": (3,6,0,5), 
-            "APP": (3,6,0,5), 
-            "SIZ": (2,6,6,5), 
-            "INT": (2,6,6,5), 
-            "EDU": (2,6,6,5)
-            }
-}
-
-# 能力値の条件値
-target_total = {
-    "6th": 90,
-    "7th": 450
-}
-
-# 各能力値の条件値
-target_status = {
-                "6th": {
-                    "STR": (10, 18),
-                    "CON": (10, 18),
-                    "POW": (10, 18),
-                    "DEX": (10, 18),
-                    "APP": (10, 18),
-                    "SIZ": (13, 18),
-                    "INT": (13, 18),
-                    "EDU": (13, 21)
-                },
-                "7th": {
-                    "STR": (50, 90),
-                    "CON": (50, 90),
-                    "POW": (50, 90),
-                    "DEX": (50, 90),
-                    "APP": (50, 90),
-                    "SIZ": (65, 90),
-                    "INT": (65, 90),
-                    "EDU": (65, 90)
-                }
-}
 
 # ダイスロール関数
 def roll_dice(count, sides):
@@ -102,11 +50,25 @@ def check_conditions(result, editions):
 
     return True
 
+def load_config():
+    config_path = Path("config.json")
+    
+    if not config_path.exists():
+        raise FileNotFoundError("config.json not found")
+    with config_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
 if __name__ == "__main__":
     result = {}
     total = 0
     reroll_cnt = 0
-    editions = "6th"
+    
+    config = load_config()
+    status = config["status"]
+    target_total = config["target_total"]
+    target_status = config["target_status"]
+    
+    editions = input("Enter the edition (6th or 7th): ")
     
     if editions not in status:
         raise ValueError("Unsupported edition")
