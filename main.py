@@ -18,17 +18,43 @@ class Edition(Enum):
     COC6 = "6th"
     COC7 = "7th"
     
+# 能力値の名前の定義
+class StatusName(Enum):
+    STR = "STR"
+    CON = "CON"
+    POW = "POW"
+    DEX = "DEX"
+    APP = "APP"
+    SIZ = "SIZ"
+    INT = "INT"
+    EDU = "EDU"
+    
+# 能力値補正の履歴の型定義
+class BonusHistory(TypedDict):
+    type: str
+    value: int
+    reason: str
+    timestamp: str
+    
 # 能力値の型定義
 class StatusValue(TypedDict):
     base: int
     bonus: int
     temp_bonus: int
+    history: list[BonusHistory] # 能力値の変化履歴
     
-type StatusResult = dict[str, StatusValue]
+type StatusResult = dict[StatusName, StatusValue]
 
+# ロールログの型定義
 class RollLog(TypedDict):
     timestamp: str
     result: StatusResult
+    
+# ログの型定義
+class Config(TypedDict):
+    status: dict[StatusName, dict[str, list[int]]]
+    target_total: dict[StatusName, int]
+    target_status: dict[StatusName, dict[str, list[int]]]
     
 edition_map = {
     "6th": Edition.COC6,
@@ -55,12 +81,13 @@ def generate_status(editions: Edition) -> StatusResult:
         result[status_name] = {
             "base": (roll_dice(count, sides) + base) * multiplier,
             "bonus": 0,
-            "temp_bonus": 0
+            "temp_bonus": 0,
+            "history": []
         }
     return result
 
 # キャラクター生成関数
-def generate_character(editions: Edition) -> tuple[StatusResult, int, list]:
+def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollLog]]:
     reroll_cnt = 0
     # ログの保存用リスト
     logs = []
@@ -77,6 +104,9 @@ def generate_character(editions: Edition) -> tuple[StatusResult, int, list]:
         if check_conditions(result, editions):
             break
         reroll_cnt += 1
+        
+        if reroll_cnt % 100 == 0:
+            logging.debug(f"Reroll count: {reroll_cnt}")
         
         if reroll_cnt >= MAX_REROLLS:
             logging.info("Maximum number of rerolls reached. Exiting.")
@@ -96,16 +126,59 @@ def calculate_final_status(
 # 能力値補正を設定
 def apply_bonus(
     result: StatusResult,
-    status_name: str,
+    status_name: StatusName,
     bonus: int = 0,
-    temp_bonus: int = 0) -> None:
+    temp_bonus: int = 0,
+    reason: str = ""
+) -> None:
     
     # 能力値の存在確認
     if status_name not in result:
         raise ValueError(f"Unknown status: {status_name}")
-
+    
+    before = calculate_final_status(
+        result[status_name]
+    )
+    logging.info(
+    f"Apply bonus: {status_name} "
+    f"(bonus={bonus}, temp_bonus={temp_bonus})"
+    )
     result[status_name]["bonus"] += bonus
     result[status_name]["temp_bonus"] += temp_bonus
+    
+    if reason:
+        result[status_name]["history"].append(
+            {
+                "type": "bonus",
+                "value": bonus,
+                "reason": reason,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+    
+    final_value = calculate_final_status(
+    result[status_name]
+    )
+
+    if final_value < 0:
+        raise ValueError(f"Final value for {status_name} is negative")
+    
+    after = final_value
+    logging.info(
+    f"{status_name} changed "
+    f"from {before} to {after}"
+)
+
+def apply_bonuses(
+    result: StatusResult,
+    bonuses: dict[str, int]
+):
+    for status_name, value in bonuses.items():
+        apply_bonus(
+            result,
+            status_name,
+            bonus=value
+        )
 
 def calculate_total_status(
     result: StatusResult
@@ -147,8 +220,9 @@ def check_conditions(result: StatusResult, editions: Edition) -> bool:
     return True
 
 # 設定ファイルの読み込み
-def load_config() -> dict:
+def load_config() -> Config:
     config_path = Path("config.json")
+    logging.info(f"Loading config: {config_path}")
     
     if not config_path.exists():
         raise FileNotFoundError("config.json not found")
@@ -156,7 +230,7 @@ def load_config() -> dict:
         return json.load(f)
 
 # ログの保存
-def save_logs(logs: list, editions: Edition):
+def save_logs(logs: list[RollLog], editions: Edition) -> None:
 
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
@@ -187,9 +261,12 @@ def save_logs(logs: list, editions: Edition):
             ensure_ascii=False,
             indent=4
         )
+    
+    logging.info(f"Saved log file: {log_logpath}")
+    logging.info(f"Saved json file: {log_jsonpath}")
 
 # 結果の表示
-def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs: list):
+def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs: list[RollLog]):
     print(f"Call of Cthulhu {editions.value} Edition Character Generator")
     print("Status:")
 
@@ -220,7 +297,7 @@ def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs:
 if __name__ == "__main__":
     result: StatusResult = {}
     reroll_cnt: int = 0
-    logs: list = []
+    logs: list[RollLog] = []
 
     config = load_config()
     status = config["status"]
@@ -238,12 +315,15 @@ if __name__ == "__main__":
 
     result, reroll_cnt, logs = generate_character(editions)
     # 永続補正
-    apply_bonus(result, "STR", bonus=5)
+    apply_bonus(
+    result,
+    StatusName.STR,
+    bonus=5,
+    reason="職業補正"
+)
 
     # 一時補正
-    apply_bonus(result, "STR", temp_bonus=-10)
-    
-    
-    
+    apply_bonus(result, StatusName.STR, temp_bonus=-10)
+
     print_result(result, reroll_cnt, editions, logs)
     save_logs(logs, editions)
