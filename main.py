@@ -1,6 +1,7 @@
 import random
 import json
 from pathlib import Path
+from datetime import datetime
 
 # ログの保存用リスト
 logs = []
@@ -58,6 +59,21 @@ def load_config():
     with config_path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+def save_logs(logs):
+
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
+    log_path = log_dir / "result.log"
+
+    with log_path.open(
+        "a",
+        encoding="utf-8"
+    ) as f:
+
+        for log in logs:
+            f.write(f"{log}\n")
+
 if __name__ == "__main__":
     result = {}
     total = 0
@@ -75,7 +91,12 @@ if __name__ == "__main__":
     
     while True:
         result = generate_status(editions)
-        logs.append(result.copy())
+        logs.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "result": result.copy()
+            }
+        )
         
         if check_conditions(result, editions):
             break
@@ -99,3 +120,5 @@ if __name__ == "__main__":
     print("Logs of rerolls")
     for log in logs:
         print(log)
+    
+    save_logs(logs)
