@@ -29,9 +29,14 @@ class StatusName(Enum):
     INT = "INT"
     EDU = "EDU"
     
+# 能力値補正の種類の定義
+class BonusType(Enum):
+    PERMANENT = "permanent"
+    TEMPORARY = "temporary"
+    
 # 能力値補正の履歴の型定義
 class BonusHistory(TypedDict):
-    type: str
+    type: BonusType
     value: int
     reason: str
     timestamp: str
@@ -52,9 +57,9 @@ class RollLog(TypedDict):
     
 # ログの型定義
 class Config(TypedDict):
-    status: dict[StatusName, dict[str, list[int]]]
-    target_total: dict[StatusName, int]
-    target_status: dict[StatusName, dict[str, list[int]]]
+    status: dict[str, dict[str, list[int]]]
+    target_total: dict[str, int]
+    target_status: dict[str, dict[str, list[int]]]
     
 edition_map = {
     "6th": Edition.COC6,
@@ -77,8 +82,10 @@ def generate_status(editions: Edition) -> StatusResult:
     result: StatusResult = {}
 
     for status_name, rule in status[editions.value].items():
+        status_enum = StatusName(status_name)
+        
         count, sides, base, multiplier = rule
-        result[status_name] = {
+        result[status_enum] = {
             "base": (roll_dice(count, sides) + base) * multiplier,
             "bonus": 0,
             "temp_bonus": 0,
@@ -90,7 +97,7 @@ def generate_status(editions: Edition) -> StatusResult:
 def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollLog]]:
     reroll_cnt = 0
     # ログの保存用リスト
-    logs = []
+    logs: list[RollLog] = []
 
     while True:
         result = generate_status(editions)
@@ -127,9 +134,10 @@ def calculate_final_status(
 def apply_bonus(
     result: StatusResult,
     status_name: StatusName,
+    history_type: BonusType,
     bonus: int = 0,
     temp_bonus: int = 0,
-    reason: str = ""
+    reason: str = "",
 ) -> None:
     
     # 能力値の存在確認
@@ -147,10 +155,11 @@ def apply_bonus(
     result[status_name]["temp_bonus"] += temp_bonus
     
     if reason:
+        history_value = bonus if bonus != 0 else temp_bonus
         result[status_name]["history"].append(
             {
-                "type": "bonus",
-                "value": bonus,
+                "type": history_type,
+                "value": history_value,
                 "reason": reason,
                 "timestamp": datetime.now().isoformat()
             }
@@ -171,12 +180,13 @@ def apply_bonus(
 
 def apply_bonuses(
     result: StatusResult,
-    bonuses: dict[str, int]
+    bonuses: dict[StatusName, int]
 ):
     for status_name, value in bonuses.items():
         apply_bonus(
             result,
             status_name,
+            history_type=BonusType.PERMANENT,
             bonus=value
         )
 
@@ -194,8 +204,9 @@ def check_total_conditions(result: StatusResult, editions: Edition) -> bool:
 def check_status_conditions(result: StatusResult, editions: Edition) -> bool:
     for status_name, (min_value, max_value) in target_status[editions.value].items():
         
+        status_enum = StatusName(status_name)
         final_value = calculate_final_status(
-            result[status_name]
+            result[status_enum]
             )
         
         if min_value > max_value:
@@ -274,7 +285,7 @@ def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs:
         final_value = calculate_final_status(
                 value
             )
-        print(f"{status_name}: "
+        print(f"{status_name.value}: "
               f"{final_value}"
               f" (Base: {value['base']}, "
               f"Bonus: {value['bonus']}, "
@@ -318,12 +329,13 @@ if __name__ == "__main__":
     apply_bonus(
     result,
     StatusName.STR,
+    history_type=BonusType.PERMANENT
     bonus=5,
-    reason="職業補正"
+    reason="職業補正",
 )
 
     # 一時補正
-    apply_bonus(result, StatusName.STR, temp_bonus=-10)
+    apply_bonus(result, StatusName.STR, history_type=BonusType.TEMPORARY, temp_bonus=-10,reason="負傷")
 
     print_result(result, reroll_cnt, editions, logs)
     save_logs(logs, editions)
