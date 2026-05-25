@@ -2,10 +2,26 @@ import random
 import json
 from pathlib import Path
 from datetime import datetime
+import logging
+from enum import Enum
 
-
-
+logging.basicConfig(level=logging.INFO)
 MAX_REROLLS = 10000
+
+# 能力値の型定義
+type StatusResult = dict[str, int]
+
+# エディションの定義
+class Edition(Enum):
+    COC6 = "6th"
+    COC7 = "7th"
+    
+edition_map = {
+    "6th": Edition.COC6,
+    "coc6": Edition.COC6,
+    "7th": Edition.COC7,
+    "coc7": Edition.COC7,
+}
 
 # ダイスロール関数
 def roll_dice(count: int, sides: int) -> int:
@@ -15,16 +31,16 @@ def roll_dice(count: int, sides: int) -> int:
     return total
 
 # 能力値の生成関数
-def generate_status(editions: str) -> dict:
-    result ={}
+def generate_status(editions: Edition) -> StatusResult:
+    result: StatusResult = {}
 
-    for status_name, rule in status[editions].items():
+    for status_name, rule in status[editions.value].items():
         count, sides, base, multiplier = rule
         result[status_name] = (roll_dice(count, sides) + base) * multiplier
     return result
 
 # キャラクター生成関数
-def generate_character(editions: str) -> tuple[dict, int, list]:
+def generate_character(editions: Edition) -> tuple[StatusResult, int, list]:
     reroll_cnt = 0
     # ログの保存用リスト
     logs = []
@@ -43,18 +59,18 @@ def generate_character(editions: str) -> tuple[dict, int, list]:
         reroll_cnt += 1
         
         if reroll_cnt >= MAX_REROLLS:
-            print("Maximum number of rerolls reached. Exiting.")
+            logging.info("Maximum number of rerolls reached. Exiting.")
             break
     return result, reroll_cnt, logs
 
 # 能力値の条件を満たしているか確認
-def check_total_conditions(result: dict, editions: str) -> bool:
+def check_total_conditions(result: StatusResult, editions: Edition) -> bool:
     total = sum(result.values())
-    return total >= target_total[editions]
+    return total >= target_total[editions.value]
 
 # 能力値ごとの条件を満たしているか確認
-def check_status_conditions(result: dict, editions: str) -> bool:
-    for status_name, (min_value, max_value) in target_status[editions].items():
+def check_status_conditions(result: StatusResult, editions: Edition) -> bool:
+    for status_name, (min_value, max_value) in target_status[editions.value].items():
         if min_value > max_value:
             raise ValueError(
                 f"{status_name}: min_value > max_value"
@@ -66,7 +82,7 @@ def check_status_conditions(result: dict, editions: str) -> bool:
     return True
 
 # 条件をすべて満たしているか確認
-def check_conditions(result: dict, editions: str) -> bool:
+def check_conditions(result: StatusResult, editions: Edition) -> bool:
 
     if not check_total_conditions(result, editions):
         return False
@@ -86,7 +102,7 @@ def load_config() -> dict:
         return json.load(f)
 
 # ログの保存
-def save_logs(logs: list, editions: str):
+def save_logs(logs: list, editions: Edition):
 
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
@@ -95,8 +111,8 @@ def save_logs(logs: list, editions: str):
     "%Y%m%d_%H%M%S"
     )
 
-    log_logpath = log_dir / f"{timestamp}_{editions}_result.log"
-    log_jsonpath = log_dir / f"{timestamp}_{editions}_result.json"
+    log_logpath = log_dir / f"{timestamp}_{editions.value}_result.log"
+    log_jsonpath = log_dir / f"{timestamp}_{editions.value}_result.json"
 
     with log_logpath.open(
         "a",
@@ -119,8 +135,8 @@ def save_logs(logs: list, editions: str):
         )
 
 # 結果の表示
-def print_result(result: dict, reroll_cnt: int, editions: str, logs: list):
-    print(f"Call of Cthulhu {editions} Edition Character Generator")
+def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs: list):
+    print(f"Call of Cthulhu {editions.value} Edition Character Generator")
     print("Status:")
 
     for status_name, value in result.items():
@@ -145,9 +161,12 @@ if __name__ == "__main__":
     target_total = config["target_total"]
     target_status = config["target_status"]
     
-    editions = input("Enter the edition (6th or 7th): ")
-    
-    if editions not in status:
+    editions_input = input("Enter the edition (6th or 7th): ").lower()
+    if editions_input not in edition_map:
+        raise ValueError("Unsupported edition")
+
+    editions = edition_map[editions_input]
+    if editions.value not in status:
         raise ValueError("Unsupported edition")
     
     result, reroll_cnt, logs = generate_character(editions)
