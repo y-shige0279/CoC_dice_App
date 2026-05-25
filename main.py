@@ -9,7 +9,8 @@ logging.basicConfig(level=logging.INFO)
 MAX_REROLLS = 10000
 
 # 能力値の型定義
-type StatusResult = dict[str, int]
+type StatusValue = dict[str, int]
+type StatusResult = dict[str, StatusValue]
 
 # エディションの定義
 class Edition(Enum):
@@ -36,7 +37,11 @@ def generate_status(editions: Edition) -> StatusResult:
 
     for status_name, rule in status[editions.value].items():
         count, sides, base, multiplier = rule
-        result[status_name] = (roll_dice(count, sides) + base) * multiplier
+        result[status_name] = {
+            "base": (roll_dice(count, sides) + base) * multiplier,
+            "bonus": 0,
+            "temp_bonus": 0
+        }
     return result
 
 # キャラクター生成関数
@@ -63,21 +68,36 @@ def generate_character(editions: Edition) -> tuple[StatusResult, int, list]:
             break
     return result, reroll_cnt, logs
 
+# 能力値の最終値を計算
+def calculate_final_status(
+    status_data: StatusValue
+) -> int:
+    return (
+        status_data["base"]
+        + status_data["bonus"]
+        + status_data["temp_bonus"]
+    )
+
 # 能力値の条件を満たしているか確認
 def check_total_conditions(result: StatusResult, editions: Edition) -> bool:
-    total = sum(result.values())
+    total = sum(calculate_final_status(status_data) for status_data in result.values())
     return total >= target_total[editions.value]
 
 # 能力値ごとの条件を満たしているか確認
 def check_status_conditions(result: StatusResult, editions: Edition) -> bool:
     for status_name, (min_value, max_value) in target_status[editions.value].items():
+        
+        final_value = calculate_final_status(
+            result[status_name]
+            )
+        
         if min_value > max_value:
             raise ValueError(
                 f"{status_name}: min_value > max_value"
             )
-        if result[status_name] < min_value:
+        if final_value < min_value:
             return False
-        if result[status_name] > max_value:
+        if final_value > max_value:
             return False
     return True
 
@@ -140,10 +160,18 @@ def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs:
     print("Status:")
 
     for status_name, value in result.items():
-        print(f"{status_name}: {value}")
+        final_value = calculate_final_status(
+                value
+            )
+        print(f"{status_name}: "
+              f"{final_value}"
+              f" (Base: {value['base']}, "
+              f"Bonus: {value['bonus']}, "
+              f"Temp Bonus: {value['temp_bonus']})"
+              )
     
     print("Total Status")
-    total = sum(result.values())
+    total = sum(calculate_final_status(status_data) for status_data in result.values())
     print(total)
     
     print("Number of rerolls")
