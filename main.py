@@ -6,6 +6,8 @@ import logging
 from enum import Enum
 from typing import TypedDict
 import copy
+from dataclasses import dataclass, field
+from dataclasses import asdict
 
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
@@ -42,11 +44,20 @@ class BonusHistory(TypedDict):
     timestamp: str
     
 # 能力値の型定義
-class StatusValue(TypedDict):
+@dataclass
+class StatusValue:
     base: int
-    bonus: int
-    temp_bonus: int
-    history: list[BonusHistory] # 能力値の変化履歴
+    bonus: int = 0
+    temp_bonus: int = 0
+    history: list[BonusHistory] = field(default_factory=list) # 補正履歴の初期値は空のリスト
+
+    # 能力値の最終値を計算
+    def final_value(self) -> int:
+        return (
+            self.base
+            + self.bonus
+            + self.temp_bonus
+        )
     
 type StatusResult = dict[StatusName, StatusValue]
 
@@ -85,12 +96,9 @@ def generate_status(editions: Edition) -> StatusResult:
         status_enum = StatusName(status_name)
         
         count, sides, base, multiplier = rule
-        result[status_enum] = {
-            "base": (roll_dice(count, sides) + base) * multiplier,
-            "bonus": 0,
-            "temp_bonus": 0,
-            "history": []
-        }
+        result[status_enum] = StatusValue(
+            base=(roll_dice(count, sides) + base) * multiplier
+        )
     return result
 
 # キャラクター生成関数
@@ -120,16 +128,6 @@ def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollL
             break
     return result, reroll_cnt, logs
 
-# 能力値の最終値を計算
-def calculate_final_status(
-    status_data: StatusValue
-) -> int:
-    return (
-        status_data["base"]
-        + status_data["bonus"]
-        + status_data["temp_bonus"]
-    )
-    
 # 能力値補正を設定
 def apply_bonus(
     result: StatusResult,
@@ -143,20 +141,19 @@ def apply_bonus(
     # 能力値の存在確認
     if status_name not in result:
         raise ValueError(f"Unknown status: {status_name}")
+    status_enum = StatusName(status_name)
     
-    before = calculate_final_status(
-        result[status_name]
-    )
+    before = result[status_enum].final_value()
     logging.info(
-    f"Apply bonus: {status_name} "
+    f"Apply bonus: {status_enum} "
     f"(bonus={bonus}, temp_bonus={temp_bonus})"
     )
-    result[status_name]["bonus"] += bonus
-    result[status_name]["temp_bonus"] += temp_bonus
+    result[status_enum].bonus += bonus
+    result[status_enum].temp_bonus += temp_bonus
     
     if reason:
         history_value = bonus if bonus != 0 else temp_bonus
-        result[status_name]["history"].append(
+        result[status_enum].history.append(
             {
                 "type": history_type,
                 "value": history_value,
@@ -165,16 +162,14 @@ def apply_bonus(
             }
         )
     
-    final_value = calculate_final_status(
-    result[status_name]
-    )
+    final_value = result[status_enum].final_value()
 
     if final_value < 0:
         raise ValueError(f"Final value for {status_name} is negative")
     
     after = final_value
     logging.info(
-    f"{status_name} changed "
+    f"{status_enum} changed "
     f"from {before} to {after}"
 )
 
@@ -183,9 +178,10 @@ def apply_bonuses(
     bonuses: dict[StatusName, int]
 ):
     for status_name, value in bonuses.items():
+        status_enum = StatusName(status_name)   
         apply_bonus(
             result,
-            status_name,
+            status_enum,
             history_type=BonusType.PERMANENT,
             bonus=value
         )
@@ -193,7 +189,7 @@ def apply_bonuses(
 def calculate_total_status(
     result: StatusResult
 ) -> int:
-    return sum(calculate_final_status(status_data) for status_data in result.values())
+    return sum(status_data.final_value() for status_data in result.values())
 
 # 能力値の条件を満たしているか確認
 def check_total_conditions(result: StatusResult, editions: Edition) -> bool:
@@ -205,9 +201,7 @@ def check_status_conditions(result: StatusResult, editions: Edition) -> bool:
     for status_name, (min_value, max_value) in target_status[editions.value].items():
         
         status_enum = StatusName(status_name)
-        final_value = calculate_final_status(
-            result[status_enum]
-            )
+        final_value = result[status_enum].final_value()
         
         if min_value > max_value:
             raise ValueError(
@@ -239,6 +233,19 @@ def load_config() -> Config:
         raise FileNotFoundError("config.json not found")
     with config_path.open("r", encoding="utf-8") as f:
         return json.load(f)
+    
+def serialize_result(result: StatusResult) -> dict:
+    serialized = {}
+
+    for status_name, value in result.items():
+        serialized[status_name.value] = {
+            "base": value.base,
+            "bonus": value.bonus,
+            "temp_bonus": value.temp_bonus,
+            "history": value.history
+        }
+
+    return serialized
 
 # ログの保存
 def save_logs(logs: list[RollLog], editions: Edition) -> None:
@@ -259,19 +266,34 @@ def save_logs(logs: list[RollLog], editions: Edition) -> None:
     ) as f:
 
         for log in logs:
-            f.write(json.dumps(log, ensure_ascii=False) + "\n")
+            serialized_log = {
+                "timestamp": log["timestamp"],
+                "result": serialize_result(log["result"])
+            }
+
+            f.write(json.dumps(serialized_log, ensure_ascii=False) + "\n")
             
     with log_jsonpath.open(
         "w",
         encoding="utf-8"
     ) as f:
 
-        json.dump(
-            logs,
-            f,
-            ensure_ascii=False,
-            indent=4
-        )
+        serialized_logs = []
+
+        for log in logs:
+            serialized_logs.append(
+                {
+                "timestamp": log["timestamp"],
+                "result": serialize_result(log["result"])
+                }
+            )
+
+            json.dump(
+                serialized_logs,
+                f,
+                ensure_ascii=False,
+                indent=4
+            )
     
     logging.info(f"Saved log file: {log_logpath}")
     logging.info(f"Saved json file: {log_jsonpath}")
@@ -282,14 +304,12 @@ def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs:
     print("Status:")
 
     for status_name, value in result.items():
-        final_value = calculate_final_status(
-                value
-            )
+        final_value = value.final_value()
         print(f"{status_name.value}: "
               f"{final_value}"
-              f" (Base: {value['base']}, "
-              f"Bonus: {value['bonus']}, "
-              f"Temp Bonus: {value['temp_bonus']})"
+              f" (Base: {value.base}, "
+              f"Bonus: {value.bonus}, "
+              f"Temp Bonus: {value.temp_bonus})"
               )
     
     print("Total Status")
@@ -329,7 +349,7 @@ if __name__ == "__main__":
     apply_bonus(
     result,
     StatusName.STR,
-    history_type=BonusType.PERMANENT
+    history_type=BonusType.PERMANENT,
     bonus=5,
     reason="職業補正",
 )
