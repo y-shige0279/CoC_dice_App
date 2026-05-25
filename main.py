@@ -7,7 +7,6 @@ from enum import Enum
 from typing import TypedDict
 import copy
 from dataclasses import dataclass, field
-from dataclasses import asdict
 
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +37,7 @@ class BonusType(Enum):
     
 # 能力値補正の履歴の型定義
 class BonusHistory(TypedDict):
-    type: BonusType
+    type: str
     value: int
     reason: str
     timestamp: str
@@ -58,6 +57,33 @@ class StatusValue:
             + self.bonus
             + self.temp_bonus
         )
+        
+    # 能力値補正を適用
+    def apply_bonus(
+        self,
+        history_type: BonusType,
+        value: int,
+        reason: str = ""
+    ) -> None:
+
+        if history_type == BonusType.PERMANENT:
+            self.bonus += value
+
+        elif history_type == BonusType.TEMPORARY:
+            self.temp_bonus += value
+
+        if reason:
+            self.history.append(
+                {
+                    "type": history_type.value,
+                    "value": value,
+                    "reason": reason,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        if self.final_value() < 0:
+            raise ValueError("Final value is negative")
     
 type StatusResult = dict[StatusName, StatusValue]
 
@@ -66,11 +92,24 @@ class RollLog(TypedDict):
     timestamp: str
     result: StatusResult
     
+@dataclass
+class RollLogger:
+    logs: list[RollLog] = field(default_factory=list)
+
+    def add_log(self, result: StatusResult) -> None:
+        self.logs.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "result": copy.deepcopy(result)
+            }
+        )
+    
 # ログの型定義
-class Config(TypedDict):
+@dataclass
+class Config:
     status: dict[str, dict[str, list[int]]]
     target_total: dict[str, int]
-    target_status: dict[str, dict[str, list[int]]]
+    target_status: dict[str, dict[str, tuple[int, int]]]
     
 edition_map = {
     "6th": Edition.COC6,
@@ -104,17 +143,13 @@ def generate_status(editions: Edition) -> StatusResult:
 # キャラクター生成関数
 def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollLog]]:
     reroll_cnt = 0
-    # ログの保存用リスト
-    logs: list[RollLog] = []
+    logger = RollLogger()
 
     while True:
+        # 能力値を生成
         result = generate_status(editions)
-        logs.append(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "result": copy.deepcopy(result)
-            }
-        )
+        # ログに生成結果を追加
+        logger.add_log(result)
         
         if check_conditions(result, editions):
             break
@@ -126,50 +161,37 @@ def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollL
         if reroll_cnt >= MAX_REROLLS:
             logging.info("Maximum number of rerolls reached. Exiting.")
             break
-    return result, reroll_cnt, logs
+    return result, reroll_cnt, logger.logs
 
 # 能力値補正を設定
 def apply_bonus(
     result: StatusResult,
     status_name: StatusName,
     history_type: BonusType,
-    bonus: int = 0,
-    temp_bonus: int = 0,
+    value: int = 0,
     reason: str = "",
 ) -> None:
     
     # 能力値の存在確認
     if status_name not in result:
         raise ValueError(f"Unknown status: {status_name}")
-    status_enum = StatusName(status_name)
     
-    before = result[status_enum].final_value()
+    before = result[status_name].final_value()
+    
     logging.info(
-    f"Apply bonus: {status_enum} "
-    f"(bonus={bonus}, temp_bonus={temp_bonus})"
+    f"Apply bonus: {status_name.value} "
+    f"(type={history_type.value}, value={value})"
     )
-    result[status_enum].bonus += bonus
-    result[status_enum].temp_bonus += temp_bonus
     
-    if reason:
-        history_value = bonus if bonus != 0 else temp_bonus
-        result[status_enum].history.append(
-            {
-                "type": history_type,
-                "value": history_value,
-                "reason": reason,
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-    
-    final_value = result[status_enum].final_value()
+    result[status_name].apply_bonus(
+        history_type=history_type,
+        value=value,
+        reason=reason
+    )
 
-    if final_value < 0:
-        raise ValueError(f"Final value for {status_name} is negative")
-    
-    after = final_value
+    after = result[status_name].final_value()
     logging.info(
-    f"{status_enum} changed "
+    f"{status_name} changed "
     f"from {before} to {after}"
 )
 
@@ -178,12 +200,11 @@ def apply_bonuses(
     bonuses: dict[StatusName, int]
 ):
     for status_name, value in bonuses.items():
-        status_enum = StatusName(status_name)   
         apply_bonus(
             result,
-            status_enum,
+            status_name,
             history_type=BonusType.PERMANENT,
-            bonus=value
+            value=value
         )
 
 def calculate_total_status(
@@ -232,7 +253,13 @@ def load_config() -> Config:
     if not config_path.exists():
         raise FileNotFoundError("config.json not found")
     with config_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+        return Config(
+            status=data["status"],
+            target_total=data["target_total"],
+            target_status=data["target_status"]
+        )
+    
     
 def serialize_result(result: StatusResult) -> dict:
     serialized = {}
@@ -288,12 +315,12 @@ def save_logs(logs: list[RollLog], editions: Edition) -> None:
                 }
             )
 
-            json.dump(
-                serialized_logs,
-                f,
-                ensure_ascii=False,
-                indent=4
-            )
+        json.dump(
+            serialized_logs,
+            f,
+            ensure_ascii=False,
+            indent=4
+        )
     
     logging.info(f"Saved log file: {log_logpath}")
     logging.info(f"Saved json file: {log_jsonpath}")
@@ -331,9 +358,9 @@ if __name__ == "__main__":
     logs: list[RollLog] = []
 
     config = load_config()
-    status = config["status"]
-    target_total = config["target_total"]
-    target_status = config["target_status"]
+    status = config.status
+    target_total = config.target_total
+    target_status = config.target_status
     
     editions_input = input("Enter the edition (6th or 7th): ").lower()
     if editions_input not in edition_map:
@@ -350,12 +377,12 @@ if __name__ == "__main__":
     result,
     StatusName.STR,
     history_type=BonusType.PERMANENT,
-    bonus=5,
+    value=5,
     reason="職業補正",
 )
 
     # 一時補正
-    apply_bonus(result, StatusName.STR, history_type=BonusType.TEMPORARY, temp_bonus=-10,reason="負傷")
+    apply_bonus(result, StatusName.STR, history_type=BonusType.TEMPORARY, value=-10, reason="負傷")
 
     print_result(result, reroll_cnt, editions, logs)
     save_logs(logs, editions)
