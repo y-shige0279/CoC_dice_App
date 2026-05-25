@@ -4,24 +4,39 @@ from pathlib import Path
 from datetime import datetime
 import logging
 from enum import Enum
+from typing import TypedDict
+import copy
 
+# ロギングの設定
 logging.basicConfig(level=logging.INFO)
-MAX_REROLLS = 10000
 
-# 能力値の型定義
-type StatusValue = dict[str, int]
-type StatusResult = dict[str, StatusValue]
+MAX_REROLLS = 10000 # 最大リロール回数
+SHOW_LOGS = False # ログを表示するかどうか
 
 # エディションの定義
 class Edition(Enum):
     COC6 = "6th"
     COC7 = "7th"
     
+# 能力値の型定義
+class StatusValue(TypedDict):
+    base: int
+    bonus: int
+    temp_bonus: int
+    
+type StatusResult = dict[str, StatusValue]
+
+class RollLog(TypedDict):
+    timestamp: str
+    result: StatusResult
+    
 edition_map = {
     "6th": Edition.COC6,
     "coc6": Edition.COC6,
+    "6": Edition.COC6,
     "7th": Edition.COC7,
     "coc7": Edition.COC7,
+    "7": Edition.COC7
 }
 
 # ダイスロール関数
@@ -55,7 +70,7 @@ def generate_character(editions: Edition) -> tuple[StatusResult, int, list]:
         logs.append(
             {
                 "timestamp": datetime.now().isoformat(),
-                "result": result.copy()
+                "result": copy.deepcopy(result)
             }
         )
         
@@ -77,10 +92,29 @@ def calculate_final_status(
         + status_data["bonus"]
         + status_data["temp_bonus"]
     )
+    
+# 能力値補正を設定
+def apply_bonus(
+    result: StatusResult,
+    status_name: str,
+    bonus: int = 0,
+    temp_bonus: int = 0) -> None:
+    
+    # 能力値の存在確認
+    if status_name not in result:
+        raise ValueError(f"Unknown status: {status_name}")
+
+    result[status_name]["bonus"] += bonus
+    result[status_name]["temp_bonus"] += temp_bonus
+
+def calculate_total_status(
+    result: StatusResult
+) -> int:
+    return sum(calculate_final_status(status_data) for status_data in result.values())
 
 # 能力値の条件を満たしているか確認
 def check_total_conditions(result: StatusResult, editions: Edition) -> bool:
-    total = sum(calculate_final_status(status_data) for status_data in result.values())
+    total = calculate_total_status(result)
     return total >= target_total[editions.value]
 
 # 能力値ごとの条件を満たしているか確認
@@ -140,7 +174,7 @@ def save_logs(logs: list, editions: Edition):
     ) as f:
 
         for log in logs:
-            f.write(f"{log}\n")
+            f.write(json.dumps(log, ensure_ascii=False) + "\n")
             
     with log_jsonpath.open(
         "w",
@@ -171,19 +205,23 @@ def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs:
               )
     
     print("Total Status")
-    total = sum(calculate_final_status(status_data) for status_data in result.values())
+    total = calculate_total_status(result)
     print(total)
     
     print("Number of rerolls")
     print(reroll_cnt)
-    print("Logs of rerolls")
-    for log in logs:
-        print(log)
+    
+    # ロールログの表示
+    if SHOW_LOGS:
+        print("Logs of rerolls")
+        for log in logs:
+            print(log)
 
 if __name__ == "__main__":
-    result = {}
-    reroll_cnt = 0
-    
+    result: StatusResult = {}
+    reroll_cnt: int = 0
+    logs: list = []
+
     config = load_config()
     status = config["status"]
     target_total = config["target_total"]
@@ -197,6 +235,15 @@ if __name__ == "__main__":
     if editions.value not in status:
         raise ValueError("Unsupported edition")
     
+
     result, reroll_cnt, logs = generate_character(editions)
+    # 永続補正
+    apply_bonus(result, "STR", bonus=5)
+
+    # 一時補正
+    apply_bonus(result, "STR", temp_bonus=-10)
+    
+    
+    
     print_result(result, reroll_cnt, editions, logs)
     save_logs(logs, editions)
