@@ -1,4 +1,6 @@
 # services/checker.py
+import logging
+
 from models.config import Edition
 from models.status import StatusName, StatusResult, calculate_total_status
 
@@ -14,13 +16,18 @@ def check_status_conditions(result: StatusResult, editions: Edition, target_stat
         status_enum = StatusName(status_name)
         final_value = result[status_enum].final_value()
         
-        if min_value > max_value:
-            raise ValueError(
-                f"{status_name}: min_value > max_value"
-            )
         if final_value < min_value:
+            logging.debug(
+                f"{status_name} is too low: "
+                f"{final_value} < {min_value}"
+            )
             return False
+
         if final_value > max_value:
+            logging.debug(
+                f"{status_name} is too high: "
+                f"{final_value} > {max_value}"
+            )
             return False
     return True
 

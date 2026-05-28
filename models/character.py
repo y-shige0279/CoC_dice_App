@@ -27,7 +27,7 @@ class Character:
 
         before = self.status[status_name].final_value()
 
-        logging.info(
+        logging.debug(
         f"Apply bonus: {status_name.value} "
         f"(type={history_type.value}, value={value})"
         )
@@ -39,7 +39,7 @@ class Character:
         )
 
         after = self.status[status_name].final_value()
-        logging.info(
+        logging.debug(
         f"{status_name.name} changed "
         f"from {before} to {after}"
         )

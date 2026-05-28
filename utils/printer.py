@@ -17,6 +17,7 @@ def print_result(character: Character) -> None:
               )
 
     print("Total Status")
+    print("※ 条件判定は補正後の値で行っています")
     total = calculate_total_status(character.status)
     print(total)
 

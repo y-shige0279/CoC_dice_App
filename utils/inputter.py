@@ -65,3 +65,49 @@ def input_bonus() -> tuple[StatusName, BonusType, int, str]:
         except ValueError as error:
             print(f"入力エラー: {error}")
             print("もう一度入力してください。")
+            
+def input_bonuses() -> list[tuple[StatusName, BonusType, int, str]]:
+    bonuses = []
+
+    if not confirm_yes_no("補正を入力しますか？"):
+        return bonuses
+
+    while True:
+        bonuses.append(input_bonus())
+
+        if not confirm_yes_no("さらに補正を追加しますか？"):
+            break
+
+    return bonuses
+
+def confirm_yes_no(message: str) -> bool:
+    yes_words = {
+        "y",
+        "yes",
+        "はい",
+        "する",
+        "追加",
+        "追加する",
+    }
+
+    no_words = {
+        "n",
+        "no",
+        "いいえ",
+        "しない",
+        "終了",
+        "やめる",
+    }
+
+    while True:
+        answer = normalize_input(
+            input(f"{message} (y/n): ")
+        )
+
+        if answer in yes_words:
+            return True
+
+        if answer in no_words:
+            return False
+
+        print("y または n を入力してください。")

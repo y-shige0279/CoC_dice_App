@@ -43,6 +43,7 @@ class DiceRule:
 # ログの型定義
 @dataclass
 class Config:
+    debug: bool
     status: dict[str, dict[str, DiceRule]]
     target_total: dict[str, int]
     target_status: dict[str, dict[str, list[int]]]
@@ -83,6 +84,7 @@ def load_config() -> Config:
                     multiplier=rule[3],
                 )
         return Config(
+            debug=data.get("debug", False),
             status=status_config,
             target_total=data["target_total"],
             target_status=data["target_status"]

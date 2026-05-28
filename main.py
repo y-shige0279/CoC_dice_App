@@ -4,7 +4,7 @@ from models.config import BonusType, Edition, edition_map, load_config
 from models.status import StatusName
 from services.generator import generate_character
 from utils.printer import print_result
-from utils.inputter import input_bonus
+from utils.inputter import input_bonuses
 from utils.input_normalizer import normalize_input
 
 # ロギングの設定
@@ -24,31 +24,23 @@ def select_edition() -> Edition:
 def run() -> None:
     config = load_config()
 
-    editions = select_edition()
+    logging.getLogger().setLevel(
+        logging.DEBUG if config.debug else logging.INFO
+    )
 
+    editions = select_edition()
+    
+    # 先に補正を入力
+    bonus_inputs = input_bonuses()
+
+    # 補正情報を渡して生成
     character = generate_character(
         editions,
         config.status,
         config.target_total,
-        config.target_status
+        config.target_status,
+        bonus_inputs,
     )
-
-    while True:
-        status_name, history_type, value, reason = input_bonus()
-
-        character.apply_bonus(
-            status_name,
-            history_type=history_type,
-            value=value,
-            reason=reason,
-        )
-
-        continue_input = normalize_input(
-            input("さらに補正を追加しますか？ (y/n): ")
-)
-
-        if continue_input not in {"y", "yes", "はい"}:
-            break
 
     print_result(character)
     character.logger.save_logs()
