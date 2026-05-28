@@ -103,6 +103,10 @@ class RollLogger:
                 "result": copy.deepcopy(result)
             }
         )
+        
+    def add_roll(self, editions: Edition, result: StatusResult) -> None:
+        self.add_log(result)
+        logging.debug(f"Added log for {editions.value} edition")
     
 # ログの型定義
 @dataclass
@@ -110,6 +114,10 @@ class Config:
     status: dict[str, dict[str, list[int]]]
     target_total: dict[str, int]
     target_status: dict[str, dict[str, tuple[int, int]]]
+    
+    def validate_edition(self, editions: Edition) -> None:
+        if editions.value not in self.status:
+            raise ValueError("Unsupported edition")
     
 edition_map = {
     "6th": Edition.COC6,
@@ -119,6 +127,69 @@ edition_map = {
     "coc7": Edition.COC7,
     "7": Edition.COC7
 }
+@dataclass
+class Character:
+    status: StatusResult
+    
+    # 能力値補正を設定
+    def apply_bonus(
+        self,
+        status_name: StatusName,
+        history_type: BonusType,
+        value: int = 0,
+        reason: str = "",
+    ) -> None:
+
+        # 能力値の存在確認
+        if status_name not in self.status:
+            raise ValueError(f"Unknown status: {status_name}")
+
+        before = self.status[status_name].final_value()
+
+        logging.info(
+        f"Apply bonus: {status_name.value} "
+        f"(type={history_type.value}, value={value})"
+        )
+
+        self.status[status_name].apply_bonus(
+            history_type=history_type,
+            value=value,
+            reason=reason
+        )
+
+        after = self.status[status_name].final_value()
+        logging.info(
+        f"{status_name.name} changed "
+        f"from {before} to {after}"
+        )
+        
+    # 結果の表示
+    def print_result(self, reroll_cnt: int, editions: Edition, logs: list[RollLog]):
+        print(f"Call of Cthulhu {editions.value} Edition Character Generator")
+        print("Status:")
+
+        for status_name, value in self.status.items():
+            final_value = value.final_value()
+            print(f"{status_name.value}: "
+                  f"{final_value}"
+                  f" (Base: {value.base}, "
+                  f"Bonus: {value.bonus}, "
+                  f"Temp Bonus: {value.temp_bonus})"
+                  )
+
+        print("Total Status")
+        total = calculate_total_status(self.status)
+        print(total)
+
+        print("Number of rerolls")
+        print(reroll_cnt)
+
+        # ロールログの表示
+        if SHOW_LOGS:
+            print("Logs of rerolls")
+            for log in logs:
+                print(log)
+
 
 # ダイスロール関数
 def roll_dice(count: int, sides: int) -> int:
@@ -128,10 +199,10 @@ def roll_dice(count: int, sides: int) -> int:
     return total
 
 # 能力値の生成関数
-def generate_status(editions: Edition) -> StatusResult:
+def generate_status(editions: Edition, status_config: dict[str, dict[str, list[int]]]) -> StatusResult:
     result: StatusResult = {}
 
-    for status_name, rule in status[editions.value].items():
+    for status_name, rule in status_config[editions.value].items():
         status_enum = StatusName(status_name)
         
         count, sides, base, multiplier = rule
@@ -140,18 +211,26 @@ def generate_status(editions: Edition) -> StatusResult:
         )
     return result
 
+def calculate_total_status(
+    result: StatusResult
+) -> int:
+    return sum(status_data.final_value() for status_data in result.values())
+
+
 # キャラクター生成関数
-def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollLog]]:
+def generate_character(editions: Edition, status_config: dict[str, dict[str, list[int]]],
+                       target_total: dict[str, int], target_status: dict[str, dict[str, tuple[int, int]]]) -> tuple[Character, int, list[RollLog]]:
     reroll_cnt = 0
     logger = RollLogger()
 
+    
     while True:
         # 能力値を生成
-        result = generate_status(editions)
+        result = generate_status(editions, status_config)
         # ログに生成結果を追加
-        logger.add_log(result)
+        logger.add_roll(editions, result)
         
-        if check_conditions(result, editions):
+        if check_conditions(result, editions, target_total, target_status):
             break
         reroll_cnt += 1
         
@@ -161,64 +240,28 @@ def generate_character(editions: Edition) -> tuple[StatusResult, int, list[RollL
         if reroll_cnt >= MAX_REROLLS:
             logging.info("Maximum number of rerolls reached. Exiting.")
             break
-    return result, reroll_cnt, logger.logs
-
-# 能力値補正を設定
-def apply_bonus(
-    result: StatusResult,
-    status_name: StatusName,
-    history_type: BonusType,
-    value: int = 0,
-    reason: str = "",
-) -> None:
     
-    # 能力値の存在確認
-    if status_name not in result:
-        raise ValueError(f"Unknown status: {status_name}")
-    
-    before = result[status_name].final_value()
-    
-    logging.info(
-    f"Apply bonus: {status_name.value} "
-    f"(type={history_type.value}, value={value})"
-    )
-    
-    result[status_name].apply_bonus(
-        history_type=history_type,
-        value=value,
-        reason=reason
-    )
-
-    after = result[status_name].final_value()
-    logging.info(
-    f"{status_name} changed "
-    f"from {before} to {after}"
-)
+    character = Character(status=result)
+    return character, reroll_cnt, logger.logs
 
 def apply_bonuses(
-    result: StatusResult,
+    character: Character,
     bonuses: dict[StatusName, int]
 ):
     for status_name, value in bonuses.items():
-        apply_bonus(
-            result,
+        Character.apply_bonus(
             status_name,
             history_type=BonusType.PERMANENT,
             value=value
         )
 
-def calculate_total_status(
-    result: StatusResult
-) -> int:
-    return sum(status_data.final_value() for status_data in result.values())
-
 # 能力値の条件を満たしているか確認
-def check_total_conditions(result: StatusResult, editions: Edition) -> bool:
+def check_total_conditions(result: StatusResult, editions: Edition, target_total: dict[str, int]) -> bool:
     total = calculate_total_status(result)
     return total >= target_total[editions.value]
 
 # 能力値ごとの条件を満たしているか確認
-def check_status_conditions(result: StatusResult, editions: Edition) -> bool:
+def check_status_conditions(result: StatusResult, editions: Edition, target_status: dict[str, dict[str, tuple[int, int]]]) -> bool:
     for status_name, (min_value, max_value) in target_status[editions.value].items():
         
         status_enum = StatusName(status_name)
@@ -235,12 +278,12 @@ def check_status_conditions(result: StatusResult, editions: Edition) -> bool:
     return True
 
 # 条件をすべて満たしているか確認
-def check_conditions(result: StatusResult, editions: Edition) -> bool:
+def check_conditions(result: StatusResult, editions: Edition, target_total: dict[str, int], target_status: dict[str, dict[str, tuple[int, int]]]) -> bool:
 
-    if not check_total_conditions(result, editions):
+    if not check_total_conditions(result, editions, target_total):
         return False
 
-    if not check_status_conditions(result, editions):
+    if not check_status_conditions(result, editions, target_status):
         return False
 
     return True
@@ -325,35 +368,11 @@ def save_logs(logs: list[RollLog], editions: Edition) -> None:
     logging.info(f"Saved log file: {log_logpath}")
     logging.info(f"Saved json file: {log_jsonpath}")
 
-# 結果の表示
-def print_result(result: StatusResult, reroll_cnt: int, editions: Edition, logs: list[RollLog]):
-    print(f"Call of Cthulhu {editions.value} Edition Character Generator")
-    print("Status:")
 
-    for status_name, value in result.items():
-        final_value = value.final_value()
-        print(f"{status_name.value}: "
-              f"{final_value}"
-              f" (Base: {value.base}, "
-              f"Bonus: {value.bonus}, "
-              f"Temp Bonus: {value.temp_bonus})"
-              )
-    
-    print("Total Status")
-    total = calculate_total_status(result)
-    print(total)
-    
-    print("Number of rerolls")
-    print(reroll_cnt)
-    
-    # ロールログの表示
-    if SHOW_LOGS:
-        print("Logs of rerolls")
-        for log in logs:
-            print(log)
+
 
 if __name__ == "__main__":
-    result: StatusResult = {}
+    character: Character | None = None
     reroll_cnt: int = 0
     logs: list[RollLog] = []
 
@@ -367,14 +386,12 @@ if __name__ == "__main__":
         raise ValueError("Unsupported edition")
 
     editions = edition_map[editions_input]
-    if editions.value not in status:
-        raise ValueError("Unsupported edition")
-    
+    config.validate_edition(editions)
 
-    result, reroll_cnt, logs = generate_character(editions)
+    character, reroll_cnt, logs = generate_character(editions, status, target_total, target_status)
+    
     # 永続補正
-    apply_bonus(
-    result,
+    character.apply_bonus(
     StatusName.STR,
     history_type=BonusType.PERMANENT,
     value=5,
@@ -382,7 +399,7 @@ if __name__ == "__main__":
 )
 
     # 一時補正
-    apply_bonus(result, StatusName.STR, history_type=BonusType.TEMPORARY, value=-10, reason="負傷")
+    character.apply_bonus(StatusName.STR, history_type=BonusType.TEMPORARY, value=-10, reason="負傷")
 
-    print_result(result, reroll_cnt, editions, logs)
+    character.print_result(reroll_cnt, editions, logs)
     save_logs(logs, editions)
