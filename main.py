@@ -42,6 +42,13 @@ class BonusHistory(TypedDict):
     reason: str
     timestamp: str
     
+@dataclass
+class DiceRule:
+    count: int
+    sides: int
+    base: int
+    multiplier: int
+    
 # 能力値の型定義
 @dataclass
 class StatusValue:
@@ -85,7 +92,7 @@ class StatusValue:
         if self.final_value() < 0:
             raise ValueError("Final value is negative")
     
-type StatusResult = dict[StatusName, StatusValue]
+StatusResult = dict[StatusName, StatusValue]
 
 # ロールログの型定義
 class RollLog(TypedDict):
@@ -94,8 +101,9 @@ class RollLog(TypedDict):
     
 @dataclass
 class RollLogger:
+    edition: Edition
     logs: list[RollLog] = field(default_factory=list)
-
+    
     def add_log(self, result: StatusResult) -> None:
         self.logs.append(
             {
@@ -104,16 +112,68 @@ class RollLogger:
             }
         )
         
-    def add_roll(self, editions: Edition, result: StatusResult) -> None:
+    def add_roll(self, result: StatusResult) -> None:
         self.add_log(result)
-        logging.debug(f"Added log for {editions.value} edition")
+        logging.debug(f"Added log for {self.edition.value} edition")
+        
+    # ログの保存
+    def save_logs(self) -> None:
+
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+
+        timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+        )
+
+        log_logpath = log_dir / f"{timestamp}_{self.edition.value}_result.log"
+        log_jsonpath = log_dir / f"{timestamp}_{self.edition.value}_result.json"
+
+        with log_logpath.open(
+            "a",
+            encoding="utf-8"
+        ) as f:
+
+            for log in self.logs:
+                serialized_log = {
+                    "timestamp": log["timestamp"],
+                    "result": serialize_result(log["result"])
+                }
+
+                f.write(json.dumps(serialized_log, ensure_ascii=False) + "\n")
+
+        with log_jsonpath.open(
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            serialized_logs = []
+
+            for log in self.logs:
+                serialized_logs.append(
+                    {
+                    "timestamp": log["timestamp"],
+                    "result": serialize_result(log["result"])
+                    }
+                )
+
+            json.dump(
+                serialized_logs,
+                f,
+                ensure_ascii=False,
+                indent=4
+            )
+
+        logging.info(f"Saved log file: {log_logpath}")
+        logging.info(f"Saved json file: {log_jsonpath}")
+
     
 # ログの型定義
 @dataclass
 class Config:
-    status: dict[str, dict[str, list[int]]]
+    status: dict[str, dict[str, DiceRule]]
     target_total: dict[str, int]
-    target_status: dict[str, dict[str, tuple[int, int]]]
+    target_status: dict[str, dict[str, list[int]]]
     
     def validate_edition(self, editions: Edition) -> None:
         if editions.value not in self.status:
@@ -129,7 +189,10 @@ edition_map = {
 }
 @dataclass
 class Character:
+    logger: RollLogger
+    edition: Edition
     status: StatusResult
+    reroll_cnt: int = 0
     
     # 能力値補正を設定
     def apply_bonus(
@@ -164,8 +227,8 @@ class Character:
         )
         
     # 結果の表示
-    def print_result(self, reroll_cnt: int, editions: Edition, logs: list[RollLog]):
-        print(f"Call of Cthulhu {editions.value} Edition Character Generator")
+    def print_result(self):
+        print(f"Call of Cthulhu {self.edition.value} Edition Character Generator")
         print("Status:")
 
         for status_name, value in self.status.items():
@@ -182,14 +245,13 @@ class Character:
         print(total)
 
         print("Number of rerolls")
-        print(reroll_cnt)
+        print(self.reroll_cnt)
 
         # ロールログの表示
         if SHOW_LOGS:
             print("Logs of rerolls")
-            for log in logs:
+            for log in self.logger.logs:
                 print(log)
-
 
 # ダイスロール関数
 def roll_dice(count: int, sides: int) -> int:
@@ -199,36 +261,31 @@ def roll_dice(count: int, sides: int) -> int:
     return total
 
 # 能力値の生成関数
-def generate_status(editions: Edition, status_config: dict[str, dict[str, list[int]]]) -> StatusResult:
+def generate_status(editions: Edition, status_config: dict[str, dict[str, DiceRule]]) -> StatusResult:
     result: StatusResult = {}
 
     for status_name, rule in status_config[editions.value].items():
         status_enum = StatusName(status_name)
         
-        count, sides, base, multiplier = rule
         result[status_enum] = StatusValue(
-            base=(roll_dice(count, sides) + base) * multiplier
+            base=(
+                roll_dice(rule.count, rule.sides)
+                + rule.base
+            ) * rule.multiplier
         )
     return result
 
-def calculate_total_status(
-    result: StatusResult
-) -> int:
-    return sum(status_data.final_value() for status_data in result.values())
-
-
 # キャラクター生成関数
-def generate_character(editions: Edition, status_config: dict[str, dict[str, list[int]]],
-                       target_total: dict[str, int], target_status: dict[str, dict[str, tuple[int, int]]]) -> tuple[Character, int, list[RollLog]]:
+def generate_character(editions: Edition, status_config: dict[str, dict[str, DiceRule]],
+                       target_total: dict[str, int], target_status: dict[str, dict[str, list[int]]]) -> Character:
     reroll_cnt = 0
-    logger = RollLogger()
-
+    logger = RollLogger(edition=editions)
     
     while True:
         # 能力値を生成
         result = generate_status(editions, status_config)
         # ログに生成結果を追加
-        logger.add_roll(editions, result)
+        logger.add_roll(result)
         
         if check_conditions(result, editions, target_total, target_status):
             break
@@ -241,19 +298,28 @@ def generate_character(editions: Edition, status_config: dict[str, dict[str, lis
             logging.info("Maximum number of rerolls reached. Exiting.")
             break
     
-    character = Character(status=result)
-    return character, reroll_cnt, logger.logs
+    character = Character(
+        logger=logger,
+        status=result,
+        edition=editions,
+        reroll_cnt=reroll_cnt,
+    )
+    return character
 
 def apply_bonuses(
     character: Character,
     bonuses: dict[StatusName, int]
 ):
     for status_name, value in bonuses.items():
-        Character.apply_bonus(
+        character.apply_bonus(
             status_name,
             history_type=BonusType.PERMANENT,
             value=value
         )
+        
+# 能力値の合計を計算
+def calculate_total_status(result: StatusResult) -> int:
+    return sum(status.final_value() for status in result.values())
 
 # 能力値の条件を満たしているか確認
 def check_total_conditions(result: StatusResult, editions: Edition, target_total: dict[str, int]) -> bool:
@@ -261,7 +327,7 @@ def check_total_conditions(result: StatusResult, editions: Edition, target_total
     return total >= target_total[editions.value]
 
 # 能力値ごとの条件を満たしているか確認
-def check_status_conditions(result: StatusResult, editions: Edition, target_status: dict[str, dict[str, tuple[int, int]]]) -> bool:
+def check_status_conditions(result: StatusResult, editions: Edition, target_status: dict[str, dict[str, list[int]]]) -> bool:
     for status_name, (min_value, max_value) in target_status[editions.value].items():
         
         status_enum = StatusName(status_name)
@@ -278,7 +344,7 @@ def check_status_conditions(result: StatusResult, editions: Edition, target_stat
     return True
 
 # 条件をすべて満たしているか確認
-def check_conditions(result: StatusResult, editions: Edition, target_total: dict[str, int], target_status: dict[str, dict[str, tuple[int, int]]]) -> bool:
+def check_conditions(result: StatusResult, editions: Edition, target_total: dict[str, int], target_status: dict[str, dict[str, list[int]]]) -> bool:
 
     if not check_total_conditions(result, editions, target_total):
         return False
@@ -297,8 +363,20 @@ def load_config() -> Config:
         raise FileNotFoundError("config.json not found")
     with config_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
+        status_config = {}
+
+        for edition, statuses in data["status"].items():
+            status_config[edition] = {}
+
+            for status_name, rule in statuses.items():
+                status_config[edition][status_name] = DiceRule(
+                    count=rule[0],
+                    sides=rule[1],
+                    base=rule[2],
+                    multiplier=rule[3],
+                )
         return Config(
-            status=data["status"],
+            status=status_config,
             target_total=data["target_total"],
             target_status=data["target_status"]
         )
@@ -317,70 +395,14 @@ def serialize_result(result: StatusResult) -> dict:
 
     return serialized
 
-# ログの保存
-def save_logs(logs: list[RollLog], editions: Edition) -> None:
-
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    
-    timestamp = datetime.now().strftime(
-    "%Y%m%d_%H%M%S"
-    )
-
-    log_logpath = log_dir / f"{timestamp}_{editions.value}_result.log"
-    log_jsonpath = log_dir / f"{timestamp}_{editions.value}_result.json"
-
-    with log_logpath.open(
-        "a",
-        encoding="utf-8"
-    ) as f:
-
-        for log in logs:
-            serialized_log = {
-                "timestamp": log["timestamp"],
-                "result": serialize_result(log["result"])
-            }
-
-            f.write(json.dumps(serialized_log, ensure_ascii=False) + "\n")
-            
-    with log_jsonpath.open(
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        serialized_logs = []
-
-        for log in logs:
-            serialized_logs.append(
-                {
-                "timestamp": log["timestamp"],
-                "result": serialize_result(log["result"])
-                }
-            )
-
-        json.dump(
-            serialized_logs,
-            f,
-            ensure_ascii=False,
-            indent=4
-        )
-    
-    logging.info(f"Saved log file: {log_logpath}")
-    logging.info(f"Saved json file: {log_jsonpath}")
-
-
-
-
 if __name__ == "__main__":
     character: Character | None = None
-    reroll_cnt: int = 0
     logs: list[RollLog] = []
 
     config = load_config()
     status = config.status
     target_total = config.target_total
     target_status = config.target_status
-    
     editions_input = input("Enter the edition (6th or 7th): ").lower()
     if editions_input not in edition_map:
         raise ValueError("Unsupported edition")
@@ -388,7 +410,7 @@ if __name__ == "__main__":
     editions = edition_map[editions_input]
     config.validate_edition(editions)
 
-    character, reroll_cnt, logs = generate_character(editions, status, target_total, target_status)
+    character = generate_character(editions, status, target_total, target_status)
     
     # 永続補正
     character.apply_bonus(
@@ -401,5 +423,5 @@ if __name__ == "__main__":
     # 一時補正
     character.apply_bonus(StatusName.STR, history_type=BonusType.TEMPORARY, value=-10, reason="負傷")
 
-    character.print_result(reroll_cnt, editions, logs)
-    save_logs(logs, editions)
+    character.print_result()
+    character.logger.save_logs()
