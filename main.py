@@ -1,7 +1,6 @@
 import logging
 
-from models.config import BonusType, Edition, edition_map, load_config
-from models.status import StatusName
+from models.config import Edition, edition_map, load_config
 from services.generator import generate_character
 from utils.printer import print_result
 from utils.inputter import input_bonuses
@@ -43,7 +42,7 @@ def run() -> None:
     )
 
     print_result(character)
-    character.logger.save_logs()
+    character.logger.save_all(character)
 
 if __name__ == "__main__":
     run()

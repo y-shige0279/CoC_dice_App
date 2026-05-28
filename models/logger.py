@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import json
 import logging
@@ -33,14 +35,10 @@ class RollLogger:
         logging.debug(f"Added log for {self.edition.value} edition")
         
     # ログの保存
-    def save_logs(self) -> None:
+    def save_logs(self, timestamp: str) -> None:
 
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
-
-        timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-        )
 
         log_logpath = log_dir / f"{timestamp}_{self.edition.value}_result.log"
         log_jsonpath = log_dir / f"{timestamp}_{self.edition.value}_result.json"
@@ -82,3 +80,40 @@ class RollLogger:
 
         logging.info(f"Saved log file: {log_logpath}")
         logging.info(f"Saved json file: {log_jsonpath}")
+        
+    def save_character(
+        self,
+        character: "Character",
+        timestamp: str
+    ) -> None:
+        from utils.character_serializer import serialize_character
+
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+
+        character_path = (
+            log_dir
+            / f"{timestamp}_{self.edition.value}_character.json"
+        )
+
+        with character_path.open(
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                serialize_character(character),
+                f,
+                ensure_ascii=False,
+                indent=4,
+            )
+
+        logging.info(
+            f"Saved character file: {character_path}"
+        )
+        
+    def save_all(self, character: "Character") -> None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        self.save_logs(timestamp)
+        self.save_character(character, timestamp)
