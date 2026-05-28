@@ -4,30 +4,22 @@ from models.config import BonusType, Edition, edition_map, load_config
 from models.status import StatusName
 from services.generator import generate_character
 from utils.printer import print_result
+from utils.inputter import input_bonus
+from utils.input_normalizer import normalize_input
 
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
 
 def select_edition() -> Edition:
-    editions_input = input("Enter the edition (6th or 7th): ").lower()
-    if editions_input not in edition_map:
-        raise ValueError("Unsupported edition")
-    return edition_map[editions_input]
+    while True:
+        editions_input = normalize_input(
+            input("どの版でキャラを作成しますか (6th or 7th): ")
+        )
 
-def apply_default_bonuses(character) -> None:
-    character.apply_bonus(
-        StatusName.STR,
-        history_type=BonusType.PERMANENT,
-        value=5,
-        reason="職業補正",
-    )
+        if editions_input in edition_map:
+            return edition_map[editions_input]
 
-    character.apply_bonus(
-        StatusName.STR,
-        history_type=BonusType.TEMPORARY,
-        value=-10,
-        reason="負傷",
-    )
+        print("存在しない版です。6 または 7 を入力してください。")
 
 def run() -> None:
     config = load_config()
@@ -41,7 +33,22 @@ def run() -> None:
         config.target_status
     )
 
-    apply_default_bonuses(character)
+    while True:
+        status_name, history_type, value, reason = input_bonus()
+
+        character.apply_bonus(
+            status_name,
+            history_type=history_type,
+            value=value,
+            reason=reason,
+        )
+
+        continue_input = normalize_input(
+            input("さらに補正を追加しますか？ (y/n): ")
+)
+
+        if continue_input not in {"y", "yes", "はい"}:
+            break
 
     print_result(character)
     character.logger.save_logs()
