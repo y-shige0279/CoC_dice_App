@@ -25,10 +25,13 @@ class BonusHistory(TypedDict):
     reason: str
     timestamp: str
     
+"""
+# 能力値の条件の型定義
 class StatusCondition:
     min: int
     max: int
-    
+"""
+
 # 能力値のダイスルールの型定義
 @dataclass
 class DiceRule:

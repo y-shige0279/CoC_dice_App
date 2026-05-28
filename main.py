@@ -3,6 +3,7 @@ import logging
 from models.config import BonusType, Edition, edition_map, load_config
 from models.status import StatusName
 from services.generator import generate_character
+from utils.printer import print_result
 
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
@@ -42,7 +43,7 @@ def run() -> None:
 
     apply_default_bonuses(character)
 
-    character.print_result()
+    print_result(character)
     character.logger.save_logs()
 
 if __name__ == "__main__":

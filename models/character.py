@@ -1,9 +1,9 @@
 import logging
 from dataclasses import dataclass
 
-from models.config import BonusType, Edition, SHOW_LOGS
-from models.logger import RollLogger, RollLog
-from models.status import StatusName, StatusResult, calculate_total_status
+from models.config import BonusType, Edition
+from models.logger import RollLogger
+from models.status import StatusName, StatusResult
 
 @dataclass
 class Character:
@@ -43,30 +43,3 @@ class Character:
         f"{status_name.name} changed "
         f"from {before} to {after}"
         )
-        
-    # 結果の表示
-    def print_result(self):
-        print(f"Call of Cthulhu {self.edition.value} Edition Character Generator")
-        print("Status:")
-
-        for status_name, value in self.status.items():
-            final_value = value.final_value()
-            print(f"{status_name.value}: "
-                  f"{final_value}"
-                  f" (Base: {value.base}, "
-                  f"Bonus: {value.bonus}, "
-                  f"Temp Bonus: {value.temp_bonus})"
-                  )
-
-        print("Total Status")
-        total = calculate_total_status(self.status)
-        print(total)
-
-        print("Number of rerolls")
-        print(self.reroll_cnt)
-
-        # ロールログの表示
-        if SHOW_LOGS:
-            print("Logs of rerolls")
-            for log in self.logger.logs:
-                print(log)
