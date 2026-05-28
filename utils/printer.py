@@ -23,6 +23,34 @@ def print_result(character: Character) -> None:
 
     print("Number of rerolls")
     print(character.reroll_cnt)
+    
+    has_history = any(
+    value.history
+    for value in character.status.values()
+    )
+
+    if has_history:
+        # 能力値の履歴の表示
+        print("補正一覧")
+        for status_name, value in character.status.items():
+
+            if not value.history:
+                continue
+
+            print(f"{status_name.value}:")
+
+            for history in value.history:
+                type_name = (
+                    "増加分"
+                    if history["type"] == "permanent"
+                else "一時"
+                )
+
+                print(
+                    f"  - {history['value']:+} "
+                    f"({type_name}) "
+                    f": {history['reason']}"
+                )
 
     # ロールログの表示
     if SHOW_LOGS:
