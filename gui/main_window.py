@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QApplication,
     QHeaderView,
+    QCheckBox,
+    QScrollArea,
 )
 
 from models.config import load_config, Edition
@@ -33,17 +35,26 @@ class MainWindow(QWidget):
         self.config = load_config()
 
         self.setWindowTitle("CoC Character Generator")
-        self.resize(600, 500)
+        self.resize(600, 900)
 
         self.setup_ui()
 
     def setup_ui(self):
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
 
         # タイトル
         title_label = QLabel(
             "Call of Cthulhu Character Generator"
         )
+        
+        self.message_label = QLabel("")# メッセージ表示用ラベル
+        self.message_label.setFixedHeight(24)# メッセージ表示用ラベルの高さを固定
         
         # タイトルを中央揃えにする
         self.current_bonus_label = QLabel()
@@ -58,9 +69,93 @@ class MainWindow(QWidget):
         self.edition_combo.currentIndexChanged.connect(
             self.on_edition_changed
         )
+        
+        target_layout = QHBoxLayout()
+
+        target_label = QLabel("合計最低値")
+
+        self.target_total_input = QLineEdit()
+        self.target_total_input.setPlaceholderText("例: 100")
+        self.target_total_input.setValidator(
+            QIntValidator(0, 9999)
+        )
+
+        target_layout.addWidget(target_label)# 目標合計入力のラベル
+        target_layout.addWidget(self.target_total_input)# 目標合計入力欄
+        
+        self.condition_table = QTableWidget()
+        self.condition_table.setColumnCount(3)
+        self.condition_table.setHorizontalHeaderLabels([
+            "能力値",
+            "最低値",
+            "最大値",
+        ])
+
+        # 行ヘッダーを非表示にする
+        self.condition_table.verticalHeader().setVisible(False)
+        # 列幅を内容に合わせて自動調整する
+        self.condition_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+
+        self.condition_table.setRowCount(8)# 能力値の数に合わせて行数を設定
+
+        status_names = [
+            "STR",
+            "CON",
+            "POW",
+            "DEX",
+            "APP",
+            "SIZ",
+            "INT",
+            "EDU",
+        ]
+
+        for row, status_name in enumerate(status_names):
+            self.condition_table.setItem(
+                row,
+                0,
+                QTableWidgetItem(status_name)
+            )
+            
+            default_min, default_max = self.config.target_status[
+                self.edition_combo.currentData().value
+                ][status_name]
+
+            # 条件テーブルにデフォルトの最低値と最大値を設定
+            self.condition_table.setItem(
+                row,
+                1,
+                QTableWidgetItem(str(default_min))
+            )
+
+            # 条件テーブルにデフォルトの最大値を設定
+            self.condition_table.setItem(
+                row,
+                2,
+                QTableWidgetItem(str(default_max))
+            )
+
+        # 条件テーブルの高さを固定
+        self.condition_table.setFixedHeight(180)
 
         self.generate_button = QPushButton(
             "キャラ生成"
+        )
+        
+        self.save_checkbox = QCheckBox(
+            "生成結果を保存する"
+        )
+
+        self.save_checkbox.setChecked(False)
+        
+        # 条件を初期値に戻すボタン
+        self.reset_condition_button = QPushButton(
+            "条件を初期値に戻す"
+        )
+        # 条件を初期値に戻すボタンのクリックイベントに条件テーブルを更新する処理を接続
+        self.reset_condition_button.clicked.connect(
+            self.reset_conditions
         )
         
         self.copy_button = QPushButton(
@@ -71,8 +166,8 @@ class MainWindow(QWidget):
             self.copy_result
         )
 
-        self.result_table = QTableWidget()
-        self.result_table.setFixedHeight(260)# 結果表示テーブルの高さを固定
+        self.result_table = QTableWidget()# 結果表示テーブル
+        self.result_table.setFixedHeight(230)# 結果表示テーブルの高さを固定
         self.result_table.setColumnCount(5)
         self.result_table.setHorizontalHeaderLabels([
             "能力値",
@@ -81,6 +176,10 @@ class MainWindow(QWidget):
             "一時",
             "最終値",
         ])
+        
+        self.reroll_label = QLabel(
+            "振り直し回数: -"
+        )
         
         # 行ヘッダーを非表示にする
         self.result_table.verticalHeader().setVisible(False)
@@ -152,6 +251,14 @@ class MainWindow(QWidget):
         self.remove_bonus_button.clicked.connect(
             self.remove_bonus
         )
+        
+        self.clear_bonus_button = QPushButton(
+            "補正を全削除"
+        )
+
+        self.clear_bonus_button.clicked.connect(
+            self.clear_bonuses
+        )
 
         bonus_layout.addWidget(self.status_combo) # ステータス選択
         bonus_layout.addWidget(self.bonus_type_combo) # 補正タイプ選択
@@ -160,6 +267,7 @@ class MainWindow(QWidget):
         bonus_layout.addWidget(self.add_bonus_button) # 補正追加ボタン
 
         self.bonus_table = QTableWidget()
+        self.bonus_table.setFixedHeight(100)
 
         self.bonus_table.setColumnCount(4)
 
@@ -170,14 +278,17 @@ class MainWindow(QWidget):
             "理由",
         ])
 
+        # 行ヘッダーを非表示にする
         self.bonus_table.verticalHeader().setVisible(False)
 
+        # 列幅を内容に合わせて自動調整する
         self.bonus_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.Stretch
         )
 
         self.bonus_inputs = []
 
+        # キャラ生成ボタンのクリックイベントにキャラクター生成処理を接続
         self.generate_button.clicked.connect(
             self.generate_character
         )
@@ -185,6 +296,11 @@ class MainWindow(QWidget):
         # UI配置
         layout.addWidget(title_label) # タイトル
         layout.addWidget(self.edition_combo)# エディション選択
+        
+        layout.addLayout(target_layout)# 目標合計入力
+        
+        layout.addWidget(self.condition_table)# 条件入力テーブル
+        layout.addWidget(self.reset_condition_button)# 条件を初期値に戻すボタン
 
         layout.addLayout(bonus_layout)# 補正入力UI
         layout.addWidget(self.bonus_table)# 補正リスト表示
@@ -192,19 +308,37 @@ class MainWindow(QWidget):
         layout.addWidget(self.current_bonus_label)# 現在の補正表示
         
         layout.addWidget(self.remove_bonus_button)# 補正削除ボタン
+        layout.addWidget(self.clear_bonus_button)# 補正全削除ボタン
 
+        layout.addWidget(self.save_checkbox)# 生成結果保存のチェックボックス
+        
         layout.addWidget(self.generate_button)# キャラ生成ボタン
         
         layout.addWidget(self.result_table)# 結果表示
+        layout.addWidget(self.reroll_label)# 振り直し回数表示
         layout.addWidget(self.copy_button)# 結果コピーボタン
+        
+        layout.addWidget(self.message_label)# メッセージ表示
 
+        scroll_area.setWidget(content_widget)# スクロールエリアにコンテンツウィジェットをセット
+        main_layout.addWidget(scroll_area)# スクロールエリアをメインレイアウトに追加
         
-        
-        self.setLayout(layout)
+        self.setLayout(main_layout)# UI全体のレイアウトを設定
+        self.update_condition_table()# 条件テーブルを初期化
 
     def generate_character(self):
         # キャラクター生成処理
         edition = self.edition_combo.currentData()
+        
+        # 目標合計や条件を取得
+        target_total, target_status = self.get_generation_conditions(
+            edition
+        )
+        
+        # 目標合計や条件の取得に失敗した場合は処理を中断
+        if target_total is None or target_status is None:
+            return
+
         # 結果表示テーブルを初期化
         self.result_table.clearContents()
         self.result_table.setRowCount(0)
@@ -212,9 +346,13 @@ class MainWindow(QWidget):
         character = generate_character(
             edition,
             self.config.status,
-            self.config.target_total,
-            self.config.target_status,
+            target_total,
+            target_status,
             self.bonus_inputs,
+        )
+        
+        self.reroll_label.setText(
+            f"振り直し回数: {character.reroll_cnt}"
         )
 
         self.result_table.setRowCount(
@@ -223,6 +361,7 @@ class MainWindow(QWidget):
 
         row = 0
 
+        # 結果表示テーブルに能力値を表示
         for status_name, value in character.status.items():
             self.result_table.setItem(
                 row,
@@ -271,19 +410,90 @@ class MainWindow(QWidget):
         # 列幅を内容に合わせて自動調整する
         self.result_table.resizeColumnsToContents()
         
-        character.logger.save_all(character)
-
-        QMessageBox.information(
-            self,
-            "保存完了",
-            "キャラクター結果を保存しました。",
-        )
+        # ログを保存
+        if self.save_checkbox.isChecked():
+            character.logger.save_all(character)
+        
+            # メッセージ表示
+            self.set_message("保存しました", "success")
+            
+        else:
+            self.set_message("保存せずに生成しました")
+        
         # 結果表示テーブルのスクロールをリセット
         self.result_table.verticalScrollBar().setValue(0)
         self.result_table.scrollToTop()
         self.result_table.clearSelection()
         
+    def get_generation_conditions(self, edition):
+        target_total = self.config.target_total.copy()
+
+        target_status = {
+            edition_key: dict(statuses)
+            for edition_key, statuses in self.config.target_status.items()
+        }
+
+        for row in range(self.condition_table.rowCount()):
+            status_item = self.condition_table.item(row, 0)
+            min_item = self.condition_table.item(row, 1)
+            max_item = self.condition_table.item(row, 2)
+
+            if not status_item or not min_item or not max_item:
+                continue
+
+            status_name = status_item.text()
+
+            try:
+                min_value = int(normalize_input(min_item.text()))
+                max_value = int(normalize_input(max_item.text()))
+            except ValueError:
+                self.set_message(
+                    f"{status_name} の最低値・最大値は数字で入力してください",
+                    "error",
+                )
+                return None, None
+
+            config_min, config_max = self.config.target_status[
+                edition.value
+            ][status_name]
+
+            if min_value < config_min:
+                self.set_message(
+                    f"{status_name} の最低値は {config_min} 以上にしてください",
+                    "error",
+                )
+                return None, None
+
+            if max_value > config_max:
+                self.set_message(
+                    f"{status_name} の最大値は {config_max} 以下にしてください",
+                    "error",
+                )
+                return None, None
+
+            if min_value > max_value:
+                self.set_message(
+                    f"{status_name} の最低値が最大値を超えています",
+                    "error",
+                )
+                return None, None
+
+            target_status[edition.value][status_name] = (
+                min_value,
+                max_value,
+            )
+
+        target_total_text = self.target_total_input.text().strip()
+
+        if target_total_text:
+            target_total[edition.value] = int(
+                normalize_input(target_total_text)
+            )
+
+        return target_total, target_status
+        
     def add_bonus(self):
+        # 補正を追加
         status_name = StatusName[
             self.status_combo.currentText()
         ]
@@ -299,22 +509,14 @@ class MainWindow(QWidget):
         value_text = self.bonus_value_input.text()
 
         if not value_text:
-            QMessageBox.warning(
-                self,
-                "入力エラー",
-                "補正値を入力してください。",
-            )
+            self.set_message("補正値を入力してください", "error")
             return
 
         try:
             value = int(normalize_input(value_text))
 
         except ValueError:
-            QMessageBox.warning(
-                self,
-                "入力エラー",
-                "補正値は数字で入力してください。",
-            )
+            self.set_message("補正値は数字で入力してください", "error")
             return
 
         reason = self.bonus_reason_input.text().strip()
@@ -361,9 +563,6 @@ class MainWindow(QWidget):
         self.bonus_value_input.clear()
         self.bonus_reason_input.clear()
         
-        # 補正追加後、値入力欄にフォーカスして全選択状態にする
-        self.bonus_value_input.setFocus()
-        self.bonus_value_input.selectAll()
         # 補正サマリーを更新
         self.update_bonus_summary()
         
@@ -390,43 +589,54 @@ class MainWindow(QWidget):
             )
             return
 
-        lines = ["現在補正:"]
-
-        for key, value in summary.items():
-            lines.append(
-                f"{key} {value:+}"
-            )
+        summary_text = " / ".join(
+            f"{key} {value:+}"
+            for key, value in summary.items()
+        )
 
         self.current_bonus_label.setText(
-            "\n".join(lines)
+            f"現在補正: {summary_text}"
         )
     
     # 結果をクリップボードにコピー
     def copy_result(self):
         lines = []
-
-        for row in range(
-            self.result_table.rowCount()
-        ):
+    
+        for row in range(self.result_table.rowCount()):
             status = self.result_table.item(row, 0)
+            base = self.result_table.item(row, 1)
+            bonus = self.result_table.item(row, 2)
+            temp_bonus = self.result_table.item(row, 3)
             final_value = self.result_table.item(row, 4)
-
-            if status and final_value:
+    
+            if not status or not final_value:
+                continue
+            
+            if status.text() == "合計":
+                lines.append(f"合計: {final_value.text()}")
+                continue
+            
+            lines.append(
+                f"{status.text()}: {final_value.text()} "
+                f"(基本{base.text()} / 増加{bonus.text()} / 一時{temp_bonus.text()})"
+            )
+    
+        lines.append(self.reroll_label.text())
+    
+        if self.bonus_inputs:
+            lines.append("")
+            lines.append("補正:")
+    
+            for status_name, history_type, value, reason in self.bonus_inputs:
+                reason_text = f" : {reason}" if reason else ""
                 lines.append(
-                    f"{status.text()}: "
-                    f"{final_value.text()}"
+                    f"{status_name.value} {value:+} ({history_type.value}){reason_text}"
                 )
-
-        text = "\n".join(lines)
-
+    
         clipboard = QApplication.clipboard()
-        clipboard.setText(text)
-
-        QMessageBox.information(
-            self,
-            "コピー完了",
-            "結果をコピーしました。",
-        )
+        clipboard.setText("\n".join(lines))
+    
+        self.set_message("結果をコピーしました", "success")
 
         
     def remove_bonus(self):
@@ -440,10 +650,26 @@ class MainWindow(QWidget):
 
         self.result_table.setRowCount(0)
         self.update_bonus_summary()
+        
+    def reset_conditions(self):
+        self.update_condition_table()
+        self.target_total_input.clear()
+        self.result_table.setRowCount(0)
+        self.set_message("条件を初期値に戻しました", "success")
+
+    def clear_bonuses(self):
+        self.bonus_inputs.clear()
+        self.bonus_table.setRowCount(0)
+        self.result_table.setRowCount(0)
+
+        self.update_bonus_summary()
+
+        self.set_message("補正を全削除しました", "success")
 
     def on_edition_changed(self):
         self.edition_combo.clearFocus()
         self.result_table.setRowCount(0)
+        self.update_condition_table()
         
     def on_status_changed(self):
         self.status_combo.clearFocus()
@@ -453,4 +679,38 @@ class MainWindow(QWidget):
         self.bonus_type_combo.clearFocus()
         self.result_table.setRowCount(0)
         
+    def update_condition_table(self):
+        edition = self.edition_combo.currentData()
+        target_status = self.config.target_status[edition.value]
+
+        for row in range(self.condition_table.rowCount()):
+            status_item = self.condition_table.item(row, 0)
+
+            if not status_item:
+                continue
+
+            status_name = status_item.text()
+
+            min_value, max_value = target_status[status_name]
+
+            self.condition_table.setItem(
+                row,
+                1,
+                QTableWidgetItem(str(min_value))
+            )
+
+            self.condition_table.setItem(
+                row,
+                2,
+                QTableWidgetItem(str(max_value))
+            )
     
+    def set_message(self, text: str, message_type: str = "info"):
+        if message_type == "error":
+            self.message_label.setStyleSheet("color: red;")
+        elif message_type == "success":
+            self.message_label.setStyleSheet("color: green;")
+        else:
+            self.message_label.setStyleSheet("color: black;")
+
+        self.message_label.setText(text)
