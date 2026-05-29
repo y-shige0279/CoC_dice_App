@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
@@ -64,7 +65,7 @@ edition_map = {
     
 # 設定ファイルの読み込み
 def load_config() -> Config:
-    config_path = Path("config.json")
+    config_path = get_resource_path("config.json")
     logging.info(f"Loading config: {config_path}")
     
     if not config_path.exists():
@@ -90,4 +91,8 @@ def load_config() -> Config:
             target_status=data["target_status"]
         )
     
-    
+def get_resource_path(filename):
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / filename
+
+    return Path(filename)
