@@ -22,7 +22,7 @@ from services.generator import generate_character
 from utils.input_normalizer import normalize_input
 from gui.delegates import IntegerDelegate
 
-from PySide6.QtGui import QFont, QIntValidator
+from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 
 class MainWindow(QWidget):
@@ -455,9 +455,17 @@ class MainWindow(QWidget):
 
         # 目標合計の入力がある場合は正規化して整数に変換してtarget_totalに反映
         if target_total_text:
-            target_total[edition.value] = int(
-                normalize_input(target_total_text)
-            )
+            try:
+                target_total[edition.value] = int(
+                    normalize_input(target_total_text)
+                )
+                
+            except ValueError:
+                self.set_message(
+                    "目標合計は数字で入力してください",
+                    "error",
+                )
+                return None, None
 
         return target_total, target_status
         
