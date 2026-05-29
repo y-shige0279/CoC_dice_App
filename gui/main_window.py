@@ -20,6 +20,7 @@ from models.config import BonusType
 from models.status import StatusName
 from services.generator import generate_character
 from utils.input_normalizer import normalize_input
+from gui.delegates import IntegerDelegate
 
 from PySide6.QtGui import QFont, QIntValidator
 from PySide6.QtCore import Qt
