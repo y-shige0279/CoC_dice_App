@@ -76,9 +76,6 @@ class MainWindow(QWidget):
 
         self.target_total_input = QLineEdit()
         self.target_total_input.setPlaceholderText("例: 100")
-        self.target_total_input.setValidator(
-            QIntValidator(0, 9999)
-        )
 
         target_layout.addWidget(target_label)# 目標合計入力のラベル
         target_layout.addWidget(self.target_total_input)# 目標合計入力欄
@@ -236,9 +233,6 @@ class MainWindow(QWidget):
         # 補正値入力欄
         self.bonus_value_input = QLineEdit()
         self.bonus_value_input.setPlaceholderText("補正値")
-        self.bonus_value_input.setValidator(
-            QIntValidator(-999, 999)
-        )
 
         self.bonus_reason_input = QLineEdit()
         self.bonus_reason_input.setPlaceholderText("理由")

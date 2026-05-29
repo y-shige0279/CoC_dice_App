@@ -15,9 +15,5 @@ class IntegerDelegate(QStyledItemDelegate):
         index,
     ):
         editor = QLineEdit(parent)
-
-        editor.setValidator(
-            QIntValidator(-999, 9999)
-        )
-
+        # 全角数字も許可するためValidatorは使わない
         return editor
