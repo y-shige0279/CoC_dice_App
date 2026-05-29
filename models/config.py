@@ -9,6 +9,12 @@ from typing import TypedDict
 MAX_REROLLS = 10000 # 最大リロール回数
 SHOW_LOGS = False # ログを表示するかどうか
 
+def get_resource_path(filename: str) -> Path:
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / filename
+
+    return Path(filename)
+
 # エディションの定義
 class Edition(Enum):
     COC6 = "6th"
@@ -91,8 +97,3 @@ def load_config() -> Config:
             target_status=data["target_status"]
         )
     
-def get_resource_path(filename):
-    if hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS) / filename
-
-    return Path(filename)
